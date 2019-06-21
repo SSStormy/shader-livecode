@@ -1,0 +1,6 @@
+layout(location = 0) in vec2 VboVertices;
+
+void main()
+{
+    gl_Position = vec4(VboVertices, 0, 1);
+}

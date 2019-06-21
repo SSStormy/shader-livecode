@@ -1,0 +1,127 @@
+#define v2 vec2
+#define v3 vec3
+#define v4 vec4
+#define f32 float
+#define s32 int
+#define m2 mat2
+#define TAU 6.283185307179586
+#define DEG_TO_RAD (TAU / 360.0)
+#define zero_v2 vec2(0,0)
+
+out v4 out_color;
+
+uniform float time;
+uniform v2 resolution;
+
+v2 uv;
+
+v4 rgba(float r, float g, float b, float a) {
+    return vec4(r,g,b,a)/255;
+}
+
+bool line(v2 origin, v2 dir, float thickness) {
+    dir = v2(dir.y, -dir.x);
+    f32 len_along_normal = dot(uv - origin, dir);
+
+    return abs(len_along_normal) < thickness;
+}
+
+f32 circle(v2 p, v2 pos, f32 radius) {
+    return length(p - pos) - radius;
+}
+
+f32 random (v2 p) {
+    return fract(sin(dot(p.xy,vec2(12.9898,78.233)))*43758.5453123);
+}
+
+f32 noise (v2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+
+    // Four corners in 2D of a tile
+    float a = random(i);
+    float b = random(i + vec2(1.0, 0.0));
+    float c = random(i + vec2(0.0, 1.0));
+    float d = random(i + vec2(1.0, 1.0));
+
+    vec2 u = f * f * (3.0 - 2.0 * f);
+
+    return mix(a, b, u.x) +
+            (c - a)* u.y * (1.0 - u.x) +
+            (d - b) * u.x * u.y;
+}
+
+f32 fbm(v2 p, f32 freq, f32 amp, f32 lacunarity, f32 gain, s32 octave) {
+    f32 accum = 0;
+    //f32 ang = 1.6180339;
+    f32 ang = 0.5;
+
+    for(s32 i = 0; i < octave; i++) {
+        f32 n = noise(p) * amp;
+        accum += n;
+
+        amp *= gain;
+
+        p = (m2(cos(ang), sin(ang), -sin(ang), cos(ang)) * p) * freq + v2(1000, 0);
+        p *= 2;
+
+        freq *= lacunarity;
+    }
+
+    return accum;
+}
+
+f32 fbm_2(v2 p) {
+    float v = 0.0;
+    float a = 0.5;
+    vec2 shift = vec2(100.0);
+
+    // Rotate to reduce axial bias
+    mat2 rot = mat2(cos(0.5), sin(0.5), -sin(0.5), cos(0.50));
+    for (int i = 0; i < 5; ++i) {
+        v += a * noise(p);
+        a *= .5;
+
+        p = rot * p * 1.5 + shift;
+    }
+    return v;
+}
+
+f32 fbm_s(v2 p) {
+    //return fbm_2(p);
+    return fbm(p, 1.5, .6, 1.1, .5, 5);
+}
+
+void main() {
+    uv = (2 * gl_FragCoord.xy / resolution) - 1;
+    uv.y *= resolution.y / resolution.x;
+
+    out_color.rgba = v4(1);
+
+    //out_color.b = smoothstep(0, 1, length(uv * .7)) * .2;
+
+    f32 mask = 1;
+    mask = min(mask, circle(uv, zero_v2, .7));
+    mask = max(mask, -circle(uv, zero_v2, .5));
+
+#if 0
+    out_color.rgb = v3(smoothstep(.1, .2, mask));
+#elif 1
+    v2 local_uv = uv;
+
+    v2 dir = uv - zero_v2;
+    f32 ang = atan(dir.y, dir.x);
+    local_uv += v2(cos(ang), sin(ang)) + time * .5;
+
+#if 0
+    f32 aa = smoothstep(0.01, 0.02, mask);
+
+    out_color.rgb = v3(fbm_s(local_uv + (fbm_s(fbm_s(local_uv) - local_uv)))) * (1 - aa);
+    if(aa >= .00001) {
+        out_color.rgb = v3(1);
+    }
+#elif 1
+    out_color.rgb = v3(fbm_s(local_uv + (fbm_s(fbm_s(local_uv) - local_uv))));
+#endif
+#endif
+}
