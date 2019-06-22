@@ -1,5 +1,5 @@
 /*
-    stormy.cpp version - 17 (2019-06-15)
+    stormy.cpp version - 18 (2019-06-15)
 
     Copyright (C) 2019 Justas Dabrila (justasdabrila@gmail.com)
 
@@ -668,6 +668,33 @@ intern void memory_allocator_free(Memory_Allocator * generic_allocator, Memory_A
 
 intern Memory_Allocation memory_allocator_reallocate(Memory_Allocator * void_allocator, Memory_Allocation allocation, s64 new_size, const char* reason);
 
+intern force_inline
+void m_free(Memory_Allocator * alloc, Memory_Allocation allocation) {
+    memory_allocator_free(alloc, allocation);
+}
+
+
+intern force_inline
+Memory_Allocation m_new(
+        Memory_Allocator * alloc, 
+        s64 size, 
+        const char * reason = "unspecified reason with m_new"
+) {
+    return memory_allocator_allocate(alloc, size, reason);
+}
+
+intern force_inline
+Memory_Allocation m_realloc(
+        Memory_Allocator * alloc, 
+        Memory_Allocation allocation,
+        s64 size, 
+        const char * reason = "unspecified reason with m_realloc"
+) {
+    return memory_allocator_reallocate(alloc, allocation, size, reason);
+}
+
+
+
 struct Read_File_Result {
     Memory_Allocation mem;
     s64 size = 0;
@@ -679,10 +706,11 @@ struct Read_File_Result {
 };
 
 intern
-const char * copy_and_null_terminate_string(String str, 
-                                            Memory_Allocator * allocator, 
-                                            const char * reason,
-                                            Memory_Allocation * out_alloc = 0
+const char * copy_and_null_terminate_string(
+        String str, 
+        Memory_Allocator * allocator, 
+        const char * reason,
+        Memory_Allocation * out_alloc = 0
 ) {
     auto mem = memory_allocator_allocate(allocator, str.length + 1, reason);
     if(out_alloc) {
@@ -697,6 +725,13 @@ const char * copy_and_null_terminate_string(String str,
     return (const char*)mem.data;
 }
 
+intern force_inline
+const char * temp_cstring(
+        String str,
+        Memory_Allocator * alloc
+) {
+    return copy_and_null_terminate_string(str, alloc, "temp cstring", 0);
+}
 
 
 #if defined(IS_WINDOWS) 
@@ -5490,6 +5525,19 @@ template<typename T>
 intern 
 T * table_insert(Table<T> * table, String key, b32 * opt_out_did_insert = 0) {
     return table_insert(table, hash_fnv(key), opt_out_did_insert);
+}
+
+template<typename T>
+intern 
+T * table_insert_or_initialize_new(Table<T> * data, u64 hash) {
+    auto did_insert = false;
+    auto * val = table_insert(data, hash, &did_insert);
+
+    if(did_insert) {
+        *val = T();
+    }
+
+    return val;
 }
 
 template<typename T>

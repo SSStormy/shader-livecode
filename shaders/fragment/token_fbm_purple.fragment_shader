@@ -3,6 +3,7 @@
 #define v4 vec4
 #define f32 float
 #define s32 int
+#define b32 bool
 #define m2 mat2
 #define TAU 6.283185307179586
 #define DEG_TO_RAD (TAU / 360.0)
@@ -92,36 +93,73 @@ f32 fbm_s(v2 p) {
     return fbm(p, 1.5, .6, 1.1, .5, 5);
 }
 
+
+f32 sdf_torus(v3 p, v2 t) {
+    v2 q = v2(length(p.xy) - t.x, p.z);
+    return length(q) - t.y;
+}
+
+f32 sdf_scene(v3 p) {
+    return sdf_torus(p - v3(0,0,-3), v2(2,.1));
+}
+
+v3 scene_normal(v3 p) {
+    v2 e = v2(0.0002, 0);
+    return normalize(v3(
+        sdf_scene(p + e.xyy) - sdf_scene(p - e.xyy),
+        sdf_scene(p + e.yxy) - sdf_scene(p - e.yxy),
+        sdf_scene(p + e.yyx) - sdf_scene(p + e.yyx)
+    ));
+}
+
 void main() {
     uv = (2 * gl_FragCoord.xy / resolution) - 1;
     uv.y *= resolution.y / resolution.x;
 
-    out_color.rgba = v4(1);
+    out_color.rgba = v4(0,0,0,1);
+    
+    v3 dir = normalize(v3(uv, -1));
 
-    //out_color.b = smoothstep(0, 1, length(uv * .7)) * .2;
+    const f32 max_dist = 100;
+    f32 dir_dist = 0;
+    v3 last_ray;
 
-    f32 mask = 1;
-    mask = min(mask, circle(uv, zero_v2, .7));
-    mask = max(mask, -circle(uv, zero_v2, .5));
+    for(s32 i = 0; i < 100; i++) {
+        v3 ray = dir * dir_dist;
+        last_ray = ray;
 
-#if 0
-    out_color.rgb = v3(smoothstep(.1, .2, mask));
-#elif 1
-    v2 local_uv = uv;
+        f32 distance = sdf_scene(ray);
 
-    v2 dir = uv - zero_v2;
-    f32 ang = atan(dir.y, dir.x);
-    local_uv += v2(cos(ang), sin(ang)) + time * .5;
+        if(distance <= 0.0002) {
+            break;
+        }
 
-#if 0
-    f32 aa = smoothstep(0.01, 0.02, mask);
-
-    out_color.rgb = v3(fbm_s(local_uv + (fbm_s(fbm_s(local_uv) - local_uv)))) * (1 - aa);
-    if(aa >= .00001) {
-        out_color.rgb = v3(1);
+        dir_dist += distance;
     }
-#elif 1
-    out_color.rgb = v3(fbm_s(local_uv + (fbm_s(fbm_s(local_uv) - local_uv))));
-#endif
-#endif
+
+    if(max_dist > dir_dist) {
+        v3 n = scene_normal(last_ray);
+        f32 d = dot(n, dir);
+        //f32 d = 1;
+
+        f32 ang = atan(uv.y, uv.x);
+        v2 p = uv * d;
+        p *= .2;
+        p.xy *= v2(cos(ang), -sin(ang)) * 20;
+
+        p += v2(1000 + time * .2);
+        //p.x *= .007 * sin(uv.y) + atan(uv.x) * .005;
+
+        v2 f1 = v2(fbm_s(p), fbm_s(p));
+        v2 f2 = v2(fbm_s(p + f1 * 7), fbm_s(p + f1 * 2));
+        v2 f3 = v2(fbm_s(p + f2 * 4), fbm_s(p + f2));
+        f32 final = fbm_s(p + f3 * 4);
+
+        f32 r = clamp(final - 0.3, 0, 1);
+        f32 g = clamp(final, 0, .2);
+
+        out_color.rb = v2(1) * v2(r, g);
+
+        //out_color.rgb = v3(final);
+    }
 }
