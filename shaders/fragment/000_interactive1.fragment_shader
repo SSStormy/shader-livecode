@@ -1,0 +1,60 @@
+#define v2 vec2
+#define v3 vec3
+#define v4 vec4
+#define f32 float
+#define s32 int
+#define b32 bool
+#define m2 mat2
+#define TAU 6.283185307179586
+#define DEG_TO_RAD (TAU / 360.0)
+#define zero_v2 vec2(0,0)
+
+out v4 out_color;
+
+uniform float iTime;
+uniform v2 iResolution;
+uniform v4 iMouse;
+
+v2 aspect;
+
+v2 to_uv(in v2 p) {
+    return (((2. * p) / iResolution) - 1.) * aspect;
+}
+
+f32 circle(in v2 p, in v2 origin, in f32 radius) {
+    return length(p - origin) - radius;
+}
+
+void main() {
+    out_color.rgba = v4(0, 0, 0, 1);
+    aspect = v2(1, iResolution.y / iResolution.x);
+
+    v2 uv = to_uv(gl_FragCoord.xy);
+    v2 mouse = to_uv(iMouse.xy);
+    mouse.y *= -1;
+
+    f32 sdf = 1;
+
+    s32 num_particles = 10;
+    f32 angle_per_particle = TAU / f32(num_particles);
+
+    f32 max_time = 2;
+    f32 mod_time = mod(iTime, max_time);
+    f32 max_dist = 1;
+
+    for(s32 particle_index = 0; 
+            particle_index < num_particles; 
+            particle_index++
+    ) {
+        f32 f_i = f32(particle_index);
+        v2 dir = v2(cos(angle_per_particle * f_i), sin(angle_per_particle * f_i));
+
+        f32 t = (mod_time / max_time);
+        v2 pos = mouse + dir * (max_dist * t);
+
+        f32 c = circle(uv, pos, .1);
+        sdf = min(sdf, c);
+    }
+
+    //out_color.rgb = v3(smoothstep(.01, .02, sdf));
+}

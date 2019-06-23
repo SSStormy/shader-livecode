@@ -1,0 +1,91 @@
+#define v2 vec2
+#define v3 vec3
+#define v4 vec4
+#define f32 float
+#define s32 int
+#define b32 bool
+#define m2 mat2
+#define TAU 6.283185307179586
+#define DEG_TO_RAD (TAU / 360.0)
+#define zero_v2 vec2(0,0)
+
+// Based on concept by Stephane Cuillerdier - Aiekick https://www.shadertoy.com/view/MddGWN
+
+out v4 out_color;
+
+uniform float iTime;
+uniform v2 iResolution;
+uniform v4 iMouse;
+
+v2 aspect;
+
+v2 to_uv(in v2 p) {
+    return (((2. * p) / iResolution) - 1.) * aspect;
+}
+
+f32 random (in v2 p) {
+    return fract(sin(dot(p.xy, vec2(12.9898,78.233)))*43758.5453123);
+}
+
+f32 IGN_dither(in v2 p) {
+    // From http://advances.realtimerendering.com/s2014/index.html#_NEXT_GENERATION_POST
+    // NEXT GENERATION POST PROCESSING IN CALL OF DUTY: ADVANCED WARFARE
+    return fract(52.9829189*fract(dot(p, vec2(0.06711056, 0.00583715))));
+}
+
+
+// Repeat around the origin by a fixed angle.
+// For easier use, num of repetitions is use to specify the angle.
+float pModPolar(inout vec2 p, float repetitions) {
+	float angle = TAU/repetitions;
+	float a = atan(p.y, p.x) + angle/2.;
+	float r = length(p);
+	float c = floor(a/angle);
+	a = mod(a,angle) - angle/2.;
+	p = vec2(cos(a), sin(a))*r;
+	// For an odd number of repetitions, fix cell index of the cell in -x direction
+	// (cell index would be e.g. -5 and 5 in the two halves of the cell):
+	if (abs(c) >= (repetitions/2)) c = abs(c);
+	return c;
+}
+
+void main() {
+    out_color.rgba = v4(0, 0, 0, 0);
+
+    aspect = v2(1, iResolution.y / iResolution.x);
+
+    v2 uv = to_uv(gl_FragCoord.xy);
+    v2 mouse = to_uv(iMouse.xy);
+    mouse.y *= -1;
+
+    f32 scale = 3.;
+    uv.xy *= scale;
+    mouse.xy *= scale;
+
+    v4 color = v4(.2, .2, .1, .2);
+
+    v2 origin = mouse.xy;
+    f32 speed = .2;
+
+    f32 index = pModPolar(uv.xy, 500);
+
+    f32 life_t = fract(iTime * speed + 1234.56 * sin(float(index) * 123456));
+
+    f32 ang_off = 0;
+    f32 r = 1;
+    f32 dist = life_t * 1;
+
+    v2 dir = v2(-1, 0);
+
+    v2 p = origin - uv - (dir * dist);
+
+    f32 death_falloff = (1 - life_t);
+    f32 metaball = (1. / length(p)) * r * death_falloff;
+
+    color += v4(.1, 0, .01, 0) * metaball * .25;
+
+    v4 c = color * smoothstep(.5, .5, metaball);
+    //c.rgb -= IGN_dither(gl_FragCoord.xy) * .01;
+    out_color.rgba = c;
+}
+

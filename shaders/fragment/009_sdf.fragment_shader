@@ -1,0 +1,161 @@
+#define v2 vec2
+#define v3 vec3
+#define v4 vec4
+#define f32 float
+#define s32 int
+#define b32 bool
+#define m2 mat2
+#define TAU 6.283185307179586
+#define DEG_TO_RAD (TAU / 360.0)
+#define zero_v2 vec2(0,0)
+
+out v4 out_color;
+
+uniform float iTime;
+uniform v2 iResolution;
+uniform v4 iMouse;
+
+v2 aspect;
+
+// https://www.shadertoy.com/view/4djSRW
+vec3 hash(vec3 p3)
+{
+	p3 = fract(p3 * vec3(.1031, .1030, .0973));
+    p3 += dot(p3, p3.yxz+19.19);
+    return fract((p3.xxy + p3.yxx)*p3.zyx);
+}
+
+// https://www.shadertoy.com/view/4dffRH
+// return value noise (in x) and its derivatives (in yzw)
+vec4 noise( in vec3 x )
+{
+    // grid
+    vec3 p = floor(x);
+    vec3 w = fract(x);
+    
+    #if 1
+    // quintic interpolant
+    vec3 u = w*w*w*(w*(w*6.0-15.0)+10.0);
+    vec3 du = 30.0*w*w*(w*(w-2.0)+1.0);
+    #else
+    // cubic interpolant
+    vec3 u = w*w*(3.0-2.0*w);
+    vec3 du = 6.0*w*(1.0-w);
+    #endif    
+    
+    // gradients
+    vec3 ga = hash( p+vec3(0.0,0.0,0.0) );
+    vec3 gb = hash( p+vec3(1.0,0.0,0.0) );
+    vec3 gc = hash( p+vec3(0.0,1.0,0.0) );
+    vec3 gd = hash( p+vec3(1.0,1.0,0.0) );
+    vec3 ge = hash( p+vec3(0.0,0.0,1.0) );
+	vec3 gf = hash( p+vec3(1.0,0.0,1.0) );
+    vec3 gg = hash( p+vec3(0.0,1.0,1.0) );
+    vec3 gh = hash( p+vec3(1.0,1.0,1.0) );
+    
+    // projections
+    float va = dot( ga, w-vec3(0.0,0.0,0.0) );
+    float vb = dot( gb, w-vec3(1.0,0.0,0.0) );
+    float vc = dot( gc, w-vec3(0.0,1.0,0.0) );
+    float vd = dot( gd, w-vec3(1.0,1.0,0.0) );
+    float ve = dot( ge, w-vec3(0.0,0.0,1.0) );
+    float vf = dot( gf, w-vec3(1.0,0.0,1.0) );
+    float vg = dot( gg, w-vec3(0.0,1.0,1.0) );
+    float vh = dot( gh, w-vec3(1.0,1.0,1.0) );
+	
+    // interpolations
+    return vec4( va + u.x*(vb-va) + u.y*(vc-va) + u.z*(ve-va) + u.x*u.y*(va-vb-vc+vd) + u.y*u.z*(va-vc-ve+vg) + u.z*u.x*(va-vb-ve+vf) + (-va+vb+vc-vd+ve-vf-vg+vh)*u.x*u.y*u.z,    // value
+                 ga + u.x*(gb-ga) + u.y*(gc-ga) + u.z*(ge-ga) + u.x*u.y*(ga-gb-gc+gd) + u.y*u.z*(ga-gc-ge+gg) + u.z*u.x*(ga-gb-ge+gf) + (-ga+gb+gc-gd+ge-gf-gg+gh)*u.x*u.y*u.z +   // derivatives
+                 du * (vec3(vb,vc,ve) - va + u.yzx*vec3(va-vb-vc+vd,va-vc-ve+vg,va-vb-ve+vf) + u.zxy*vec3(va-vb-ve+vf,va-vb-vc+vd,va-vc-ve+vg) + u.yzx*u.zxy*(-va+vb+vc-vd+ve-vf-vg+vh) ));
+}
+
+v2 to_uv(in v2 p) {
+    return (((2. * p) / iResolution) - 1.) * aspect;
+}
+
+f32 IGN_dither(in v2 p) {
+    // From http://advances.realtimerendering.com/s2014/index.html#_NEXT_GENERATION_POST
+    // NEXT GENERATION POST PROCESSING IN CALL OF DUTY: ADVANCED WARFARE
+    return fract(52.9829189*fract(dot(p, vec2(0.06711056, 0.00583715))));
+}
+
+// Cylinder standing upright on the xz plane
+float sdf_cylinder(vec3 p, float r, float height) {
+	float d = length(p.xz) - r;
+	d = max(d, abs(p.y) - height);
+	return d;
+}
+
+f32 sdf_scene(in v3 p) {
+    f32 sdf = 1000000;
+    v3 off = v3(0., 0., -3.);
+    sdf = min(sdf, length(p - off) - 1.);
+    return sdf;
+}
+
+v3 sdf_normal(in v3 p) {
+    v2 e = v2(0.0002, 0);
+    return normalize(v3(
+        sdf_scene(p + e.xyy) - sdf_scene(p - e.xyy),
+        sdf_scene(p + e.yxy) - sdf_scene(p - e.yxy),
+        sdf_scene(p + e.yyx) - sdf_scene(p - e.yyx)
+    ));
+}
+
+f32 sdf_scene_fur(in v3 p) {
+    f32 sdf = sdf_scene(p);
+    v3 normal = sdf_normal(p);
+    v4 n = noise(100 * p);
+
+    sdf = min(sdf, sdf_cylinder(p - v3(0,0,-3.5), 1, 2));
+
+    return sdf;
+}
+
+v3 sdf_normal_fur(in v3 p) {
+    v2 e = v2(0.0002, 0);
+    return normalize(v3(
+        sdf_scene_fur(p + e.xyy) - sdf_scene_fur(p - e.xyy),
+        sdf_scene_fur(p + e.yxy) - sdf_scene_fur(p - e.yxy),
+        sdf_scene_fur(p + e.yyx) - sdf_scene_fur(p - e.yyx)
+    ));
+}
+
+
+void main() {
+    out_color.rgb = v3(.85, .88, .9);
+
+    aspect = v2(1, iResolution.y / iResolution.x);
+    v2 uv = to_uv(gl_FragCoord.xy);
+
+    v3 dir = normalize(v3(uv, -1));
+
+    const f32 max_dist = 100;
+    f32 dir_dist = 0;
+
+    v3 last_ray;
+    for(s32 i = 0; i < 100; i++) {
+        v3 ray = dir * dir_dist;
+        last_ray = ray;
+
+        f32 distance = sdf_scene_fur(ray);
+
+        if(distance <= 0.0002) {
+            break;
+        }
+
+        dir_dist += distance;
+    }
+
+    if(max_dist > dir_dist) {
+        v3 light_dir = normalize(v3(1,1,1));
+        v3 normal = sdf_normal_fur(last_ray);
+
+        f32 lambert = max(dot(light_dir, normal), 0);
+        out_color.rgb = v3(lambert);
+
+    }
+
+    out_color.rgb *= smoothstep(0., 1., 1.7 - length(uv));
+}
+
