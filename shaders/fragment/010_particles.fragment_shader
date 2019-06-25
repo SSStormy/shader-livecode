@@ -1,0 +1,79 @@
+#define v2 vec2
+#define v3 vec3
+#define v4 vec4
+#define f32 float
+#define s32 int
+#define b32 bool
+#define m2 mat2
+#define TAU 6.283185307179586
+#define DEG_TO_RAD (TAU / 360.0)
+#define zero_v2 vec2(0,0)
+
+// Based on concept by Stephane Cuillerdier - Aiekick https://www.shadertoy.com/view/MddGWN
+
+out v4 out_color;
+
+uniform float iTime;
+uniform v2 iResolution;
+uniform v4 iMouse;
+
+v2 aspect;
+
+v2 to_uv(in v2 p) {
+    return (((2. * p) / iResolution) - 1.) * aspect;
+}
+
+// Repeat around the origin by a fixed angle.
+// For easier use, num of repetitions is use to specify the angle.
+float pModPolar(inout vec2 p, float repetitions) {
+	float angle = TAU/repetitions;
+	float a = atan(p.y, p.x) + angle/2.;
+	float r = length(p);
+	float c = floor(a/angle);
+	a = mod(a,angle) - angle/2.;
+	p = vec2(cos(a), sin(a))*r;
+	// For an odd number of repetitions, fix cell index of the cell in -x direction
+	// (cell index would be e.g. -5 and 5 in the two halves of the cell):
+	if (abs(c) >= (repetitions/2)) c = abs(c);
+	return c;
+}
+
+void main() {
+    out_color.rgba = v4(0, 0, 0, 0);
+
+    aspect = v2(1, iResolution.y / iResolution.x);
+
+    v2 uv = to_uv(gl_FragCoord.xy);
+    v2 mouse = to_uv(iMouse.xy);
+
+    mouse.y *= -1;
+
+    f32 scale = 3.;
+    uv.xy *= scale;
+    mouse.xy *= scale;
+
+    v4 color = v4(.2, .1, .2, .3);
+
+    v2 origin = zero_v2;
+    f32 speed = .2;
+
+    v2 polar = v2(atan(uv.y, uv.x), length(uv));
+
+    {
+        f32 f = abs(fract((polar.x / (TAU * (1./8.))) - polar.y + iTime) - .5) * 2;
+        f = smoothstep(.5,.55,f);
+
+        out_color.r = f * .9;
+        out_color.g = f * .4;
+        out_color.a += smoothstep(0., 1., 2.2 - polar.y);
+    }
+
+    {
+
+        f32 f = abs(fract((polar.x / (TAU * (1./4.))) - polar.y + iTime) - .5) * 4 * smoothstep(0, 1, abs(sin(iTime)));
+        out_color.g += f * .4;
+        out_color.b = f * .5;
+        out_color.a -= smoothstep(0., 1., 1.5 - polar.y);
+    }
+}
+

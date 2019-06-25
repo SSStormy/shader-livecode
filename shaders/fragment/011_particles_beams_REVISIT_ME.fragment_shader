@@ -1,0 +1,97 @@
+#define v2 vec2
+#define v3 vec3
+#define v4 vec4
+#define f32 float
+#define s32 int
+#define b32 bool
+#define m2 mat2
+#define TAU 6.283185307179586
+#define DEG_TO_RAD (TAU / 360.0)
+#define zero_v2 vec2(0,0)
+
+out v4 out_color;
+
+uniform float iTime;
+uniform v2 iResolution;
+uniform v4 iMouse;
+
+v2 aspect;
+
+v2 to_uv(in v2 p) {
+    return (((2. * p) / iResolution) - 1.) * aspect;
+}
+
+// Repeat around the origin by a fixed angle.
+// For easier use, num of repetitions is use to specify the angle.
+float pModPolar(inout vec2 p, float repetitions) {
+	float angle = TAU/repetitions;
+	float a = atan(p.y, p.x) + angle/2.;
+	float r = length(p);
+	float c = floor(a/angle);
+	a = mod(a,angle) - angle/2.;
+	p = vec2(cos(a), sin(a))*r;
+	// For an odd number of repetitions, fix cell index of the cell in -x direction
+	// (cell index would be e.g. -5 and 5 in the two halves of the cell):
+	if (abs(c) >= (repetitions/2)) c = abs(c);
+	return c;
+}
+
+void main() {
+    out_color.rgba = v4(0, 0, 0, 0);
+
+    aspect = v2(1, iResolution.y / iResolution.x);
+
+    v2 uv = to_uv(gl_FragCoord.xy);
+    v2 mouse = to_uv(iMouse.xy);
+
+    mouse.y *= -1;
+
+    f32 scale = 10;
+    uv.xy *= scale;
+    mouse.xy *= scale;
+
+    const f32 div = 4;
+    f32 l = length(uv);
+    f32 a = atan(uv.y, uv.x) / (TAU * (1./div));
+    f32 f = abs(fract(a- l * 0) - .5); // / (div / 8);
+    f = smoothstep(.3, .5, f);
+    f32 index = floor(a) + div;
+
+    v2 p = v2(cos(f), sin(f)) * l;
+
+#if 0
+    out_color.r += abs(p.x * .1);
+    out_color.g += abs(p.y * .5);
+    //out_color.b += fwidth(p.y) * 10;
+    //out_color.r += fwidth(p.x) * 10;
+    out_color.a = 1;
+#elif 1
+    f32 life_t = fract(iTime * .4 + 1234.56 * sin(float(index) * 123456));
+
+    v2 mb_pos = p + v2(-1, 0) * life_t * 10;
+    f32 mb = 1 / length(mb_pos) * 1;
+    out_color = v4(.3, 0,0,.3) * mb * (1 - life_t);
+
+#endif
+
+/*
+    v4 color = v4(.2, .2, .1, .2);
+
+    v2 origin = mouse.xy;
+    f32 speed = .2;
+
+    f32 life_t = length(p - origin);
+
+    f32 r = 5;
+    f32 dist = 3;
+
+    v2 dir = v2(-1, 1);
+    v2 meta_p = origin - uv - (dir * dist);
+
+    f32 death_falloff = (1 - life_t);
+    f32 metaball = (1. / length(meta_p)) * r * death_falloff;
+
+    out_color += v4(.4, 0., .2, .1) * metaball * .0025;
+    */
+}
+
