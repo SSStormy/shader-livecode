@@ -1,0 +1,81 @@
+#define v2 vec2
+#define v3 vec3
+#define v4 vec4
+#define f32 float
+#define s32 int
+#define b32 bool
+#define m2 mat2
+#define TAU (acos(-1.)*2.)
+#define DEG_TO_RAD (TAU / 360.0)
+#define zero_v2 vec2(0,0)
+
+out v4 out_color;
+
+uniform float iTime;
+uniform v2 iResolution;
+uniform v4 iMouse;
+
+f32 sdf_line ( in vec2 p, in vec2 a, in vec2 b ) {
+	vec2 pa = p-a, ba = b-a;
+	float h = clamp( dot(pa,ba)/dot(ba,ba), 0.0, 1.0 );
+	return length( pa - ba*h );
+}
+
+void main() {
+    const f32 div = .02;
+    const f32 octaves = 3;
+
+    v2 global_uv = (gl_FragCoord.xy / iResolution.xy) * v2(iResolution.x / iResolution.y, 1);
+
+    {
+        f32 a = 45 * DEG_TO_RAD;
+        v2 uv = m2(cos(a), sin(a), -sin(a), cos(a)) * global_uv;
+        const f32 grid_div = .1;
+
+        f32 x_index = floor(uv.x / grid_div);
+        f32 y_index = floor(uv.y / grid_div);
+        uv.x = mod(uv.x, grid_div);
+        uv.y = mod(uv.y, grid_div);
+
+
+        f32 thickness = s32(x_index + y_index) % 2 == 0 ? .8 : .2;
+
+        f32 sdf = sdf_line(uv, zero_v2, v2(1, 0));
+        sdf = min(sdf, sdf_line(uv, zero_v2, v2(0, 1)));
+
+        f32 mask = sdf > .001 ? 0 : 1;
+        out_color.rgb += v3(1, 0, .35) * thickness * mask;
+    }
+
+#if 0
+    for(s32 s_octave = 0; s_octave < s32(octaves); s_octave++) {
+        f32 octave = f32(s_octave) + 1;
+        v2 uv = global_uv;
+        uv.x += octave * (1 / octaves);
+
+        f32 index = floor(uv.x / div) + s_octave * div;
+        uv.x = mod(uv.x, div) - (div * .5);
+
+        f32 life_t = fract(cos(index) + f32(iTime) * .05 * octave);
+        v2 pos = v2(0, 1) * life_t * 2;
+
+        f32 sdf = sdf_line(uv, pos, v2(0,0));
+
+        f32 len_to_top = length(uv - pos);
+        f32 width = .0006 * octave;
+        f32 death_t = 1 - life_t;
+        f32 length_t = 1 / len_to_top;
+        f32 mask = (sdf > width ? 0. : 1.);
+
+        v3 line_color = v3(.1, 0, .4) * mask;
+        line_color += v3(.1, 0, 0) * length_t * mask;
+        line_color *= smoothstep(0, 5, length_t);
+
+        out_color.rgb += line_color;
+        if(len_to_top <= 0.001) {
+            out_color.rgb = v3(1);
+        }
+    }
+#endif
+}
+

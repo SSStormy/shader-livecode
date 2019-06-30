@@ -1,0 +1,35 @@
+#define v2 vec2
+#define v3 vec3
+#define v4 vec4
+#define f32 float
+#define s32 int
+#define b32 bool
+#define m2 mat2
+#define TAU (acos(-1.)*2.)
+#define DEG_TO_RAD (TAU / 360.0)
+#define zero_v2 vec2(0,0)
+
+out v4 out_color;
+
+uniform float iTime;
+uniform v2 iResolution;
+uniform v4 iMouse;
+
+void main() {
+    const f32 div = .01;
+
+    v2 uv = (gl_FragCoord.xy / iResolution.xy) * v2(iResolution.x / iResolution.y, 1);
+
+    uv.x = abs(uv.x);
+    uv.y *= -1;
+    uv *= 2;
+
+    f32 index = floor(uv.x / div);
+    uv.x = mod(uv.x, div) - (div * .5);
+
+    f32 life_t = fract(cos(index) + f32(iTime) * .02) * 10;
+    v2 pos = uv + v2(0, 1) * life_t;
+    f32 mb = 1. / length(pos) * div * 1;
+    out_color += v4(.15, .05, .1, .1) * mb;
+}
+

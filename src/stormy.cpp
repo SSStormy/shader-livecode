@@ -1,5 +1,5 @@
 /*
-    stormy.cpp version - 18 (2019-06-15)
+    stormy.cpp version - 21 (2019-06-30)
 
     Copyright (C) 2019 Justas Dabrila (justasdabrila@gmail.com)
 
@@ -452,6 +452,15 @@ s64 string_index_of(
 }
 
 intern force_inline
+b32 string_starts_with(
+        String target, 
+        String starts_with
+) {
+    return string_index_of(target, starts_with) == 0;
+}
+
+
+intern force_inline
 s64 string_last_index_of(
         String target, 
         String contains, 
@@ -540,8 +549,14 @@ struct Allocate_String_Result {
 
 intern force_inline
 b32 allocation_equals(const Memory_Allocation * a, const Memory_Allocation * b) {
-    return a->data == b->data && a->length == b->length;
+    return a->data == b->data;
 }
+
+struct Directory_Entry {
+    String name;
+    b32 is_file;
+    b32 is_directory;
+};
 
 #if defined(IS_WINDOWS)
 
@@ -655,9 +670,7 @@ b32 allocation_equals(const Memory_Allocation * a, const Memory_Allocation * b) 
             assert(false);
         }
     }
-
 #endif
-
 
 baked Memory_Allocation null_page = {0,0};
 
@@ -667,33 +680,6 @@ intern Memory_Allocation memory_allocator_allocate(Memory_Allocator * generic_al
 intern void memory_allocator_free(Memory_Allocator * generic_allocator, Memory_Allocation allocation);
 
 intern Memory_Allocation memory_allocator_reallocate(Memory_Allocator * void_allocator, Memory_Allocation allocation, s64 new_size, const char* reason);
-
-intern force_inline
-void m_free(Memory_Allocator * alloc, Memory_Allocation allocation) {
-    memory_allocator_free(alloc, allocation);
-}
-
-
-intern force_inline
-Memory_Allocation m_new(
-        Memory_Allocator * alloc, 
-        s64 size, 
-        const char * reason = "unspecified reason with m_new"
-) {
-    return memory_allocator_allocate(alloc, size, reason);
-}
-
-intern force_inline
-Memory_Allocation m_realloc(
-        Memory_Allocator * alloc, 
-        Memory_Allocation allocation,
-        s64 size, 
-        const char * reason = "unspecified reason with m_realloc"
-) {
-    return memory_allocator_reallocate(alloc, allocation, size, reason);
-}
-
-
 
 struct Read_File_Result {
     Memory_Allocation mem;
@@ -706,11 +692,10 @@ struct Read_File_Result {
 };
 
 intern
-const char * copy_and_null_terminate_string(
-        String str, 
-        Memory_Allocator * allocator, 
-        const char * reason,
-        Memory_Allocation * out_alloc = 0
+const char * copy_and_null_terminate_string(String str, 
+                                            Memory_Allocator * allocator, 
+                                            const char * reason,
+                                            Memory_Allocation * out_alloc = 0
 ) {
     auto mem = memory_allocator_allocate(allocator, str.length + 1, reason);
     if(out_alloc) {
@@ -728,11 +713,10 @@ const char * copy_and_null_terminate_string(
 intern force_inline
 const char * temp_cstring(
         String str,
-        Memory_Allocator * alloc
+        Memory_Allocator * temp
 ) {
-    return copy_and_null_terminate_string(str, alloc, "temp cstring", 0);
+    return copy_and_null_terminate_string(str, temp, "temp_cstring");
 }
-
 
 #if defined(IS_WINDOWS) 
 
@@ -5478,6 +5462,21 @@ T * table_insert(
 
 template<typename T>
 intern
+T * table_insert_or_initialize_new(
+        Table<T> * table, 
+        u64 hash
+) {
+    auto did_insert = false;
+    auto * val = table_insert(table, hash, &did_insert);
+    if(did_insert) {
+        *val = {};
+    }
+
+    return val;
+}
+
+template<typename T>
+intern
 T * table_walk_storage(Table<T> * table, u64 hash, b32 should_remove) {
     // NOTE(justas): @COPY-PASTE :TableStorageIterator
     auto index = hash % table->max_storage_elements;
@@ -5529,19 +5528,6 @@ T * table_insert(Table<T> * table, String key, b32 * opt_out_did_insert = 0) {
 
 template<typename T>
 intern 
-T * table_insert_or_initialize_new(Table<T> * data, u64 hash) {
-    auto did_insert = false;
-    auto * val = table_insert(data, hash, &did_insert);
-
-    if(did_insert) {
-        *val = T();
-    }
-
-    return val;
-}
-
-template<typename T>
-intern 
 T * table_remove(Table<T> * data, String key) {
     return table_walk_storage(data, hash_fnv(key), true);
 }
@@ -5567,6 +5553,10 @@ v2_f64 _v2(f64 x, f64 y) {
     return make_vector_f64(x,y);
 }
 
+intern force_inline
+v2_f64 _v2(f64 xy) {
+    return make_vector_f64(xy, xy);
+}
 
 intern force_inline
 f64 smoothstep(f64 x) {
@@ -5788,7 +5778,6 @@ struct Memory_Allocator_Arena {
     void * storage;
     s64 top;
     Memory_Allocation page;
-    Memory_Allocation last_allocation;
 };
 
 struct Memory_Allocator_Tracked {
@@ -5862,7 +5851,6 @@ void memory_allocator_arena_reset(Memory_Allocator * allocator) {
     assert(allocator->type == MEMORY_ALLOCATOR_TYPE_ARENA);
 
     allocator->arena.top = 0;
-    allocator->arena.last_allocation = null_page;
 }
 
 intern force_inline
@@ -5873,9 +5861,38 @@ Memory_Allocator make_arena_memory_allocator(Memory_Allocation page) {
     ret.arena.top = 0;
     ret.arena.page = page;
     ret.arena.storage = ret.arena.page.data;
-    ret.arena.last_allocation = null_page;
 
     return ret;
+}
+
+intern
+Array<String> string_split(
+        String str, 
+        char split_at,
+        Memory_Allocator * temp
+) {
+    auto strs = make_array<String>(1, temp, "string_split"_S);
+
+    s64 prev_split_at_index = 0;
+    auto had_to_split = false;
+    for(auto char_index = 0;
+            char_index < str.length;
+            char_index++
+    ) {
+        auto c = str.str[char_index];
+
+        if(c == split_at) {
+            had_to_split = true;
+            *array_append(&strs) = make_string(str.str + prev_split_at_index, char_index - prev_split_at_index);
+            prev_split_at_index = char_index + 1; // NOTE(justas): +1 so we ignore the split_at char
+        }
+    }
+
+    if(had_to_split) {
+        *array_append(&strs) = make_string(str.str + prev_split_at_index, str.length - prev_split_at_index);
+    }
+
+    return strs;
 }
 
 intern force_inline
@@ -5920,7 +5937,6 @@ Memory_Allocation memory_allocator_allocate(
             ret.data = (u8*)allocator->storage + allocator->top;
 
             allocator->top = new_top;
-            allocator->last_allocation = ret;
 
             return ret;
         }
@@ -5968,10 +5984,10 @@ void memory_allocator_free(
         case MEMORY_ALLOCATOR_TYPE_ARENA: {
             auto * allocator = &generic_allocator->arena;
 
-            if(allocation_equals(&allocator->last_allocation, &allocation)) {
+            if((u8*)allocation.data + allocation.length == (u8*)allocator->storage + allocator->top) {
                 allocator->top -= allocation.length;
-                allocator->last_allocation = null_page;
             }
+
             break;
         }
         case MEMORY_ALLOCATOR_TYPE_PAGE: {
@@ -6031,6 +6047,36 @@ String string_trim_in_place(String str) {
     return ret;
 }
 
+intern force_inline
+b32 try_remove_file(const char * path) {
+    auto status = remove(path);
+    return status == 0;
+}
+
+intern force_inline
+b32 try_remove_file(
+        String str,
+        Memory_Allocator * temp
+) {
+    return try_remove_file(temp_cstring(str, temp));
+}
+
+intern force_inline
+b32 does_file_exist(const char * path) {
+    auto * f = fopen(path, "r");
+    defer { if(f) fclose(f); };
+
+    return f == 0 ? false : true;
+}
+
+intern force_inline
+b32 does_file_exist(
+        String path,
+        Memory_Allocator * temp
+) {
+    return does_file_exist(temp_cstring(path, temp));
+}
+
 #if defined(IS_LINUX) 
     #include <time.h>
 
@@ -6081,6 +6127,41 @@ String string_trim_in_place(String str) {
         system(arg.str);
     }
 
+    #include "dirent.h"
+
+    intern
+    Array<Directory_Entry> get_all_files_in_directory(
+            const char * dir,
+            Memory_Allocator * temp
+    ) {
+        auto * dir_root = opendir(dir);
+        auto entries = make_array<Directory_Entry>(0, temp, "directory entries"_S);
+
+        if(dir && dir_root) {
+            while(true) {
+                auto * dir_next = readdir(dir_root);
+
+                if(!dir_next) {
+                    break;
+                }
+
+                auto name = make_string(dir_next->d_name);
+                if(string_equals_case_sensitive("."_S, name) || string_equals_case_sensitive(".."_S, name)) {
+                    continue;
+                }
+
+                auto * entry = array_append(&entries);
+                entry->name = make_string_copy_temporary(name, temp);
+                entry->is_file = dir_next->d_type == DT_REG;
+                entry->is_directory = dir_next->d_type == DT_DIR;
+            }
+
+            closedir(dir_root);
+        }
+
+        return entries;
+    }
+
 #elif defined(IS_WINDOWS)
     intern
     void open_process_or_url(
@@ -6097,6 +6178,15 @@ String string_trim_in_place(String str) {
     }
 
 #endif
+
+intern force_inline
+Array<Directory_Entry> get_all_files_in_directory(
+        String dir,
+        Memory_Allocator * temp
+) {
+    return get_all_files_in_directory(temp_cstring(dir, temp), temp);
+}
+
 
 intern
 f64 polygon_area(
@@ -6232,6 +6322,218 @@ v2_f64 make_vector_f64(v2_u32 v) {
     return ret;
 }
 
+intern force_inline
+void m_free(Memory_Allocator * alloc, Memory_Allocation allocation) {
+    memory_allocator_free(alloc, allocation);
+}
+
+intern force_inline
+void string_free(
+        Memory_Allocator * alloc, 
+        String * str
+) {
+    Memory_Allocation recovered;
+    recovered.data = (void*)str->str;
+    recovered.length = str->length;
+    m_free(alloc, recovered);
+    *str = empty_string;
+}
+
+intern force_inline
+Memory_Allocation m_new(
+        Memory_Allocator * alloc, 
+        s64 size, 
+        const char * reason = "unspecified reason with m_new"
+) {
+    return memory_allocator_allocate(alloc, size, reason);
+}
+
+intern force_inline
+Memory_Allocation m_realloc(
+        Memory_Allocator * alloc, 
+        Memory_Allocation allocation,
+        s64 size, 
+        const char * reason = "unspecified reason with m_realloc"
+) {
+    return memory_allocator_reallocate(alloc, allocation, size, reason);
+}
+
+struct Rand_Seeder {
+    Rand_Seeder() {
+        srand(time(0));
+    }
+};
+
+intern Rand_Seeder seeder = Rand_Seeder();
+
+intern force_inline
+s32 random_int() {
+    return rand();
+}
+
+template<typename T, typename CompareFx>
+intern force_inline
+void array_sort(Array<T> * arr, CompareFx && compare) {
+    qsort(arr->storage, arr->watermark, sizeof(T), compare);
+}
+
+intern force_inline
+s32 string_compare(
+        String a,
+        String b
+) {
+    auto max_len = MAX(a.length, b.length);
+
+    for(auto index = 0;
+            index < max_len;
+            index++
+       ) {
+        if(index == a.length) return (s32)b.str[index];
+        if(index == b.length) return (s32)a.str[index];
+        auto delta = (s32)a.str[index] - (s32)b.str[index];
+        if(delta != 0) {
+            return delta;
+        }
+    }
+    return 0;
+}
+
+template<typename T>
+struct Bucket_Pool_Bucket {
+    T * storage;
+    u8 * is_free;
+    s64 free_slots;
+
+    Memory_Allocation storage_page;
+    Memory_Allocation is_free_page;
+};
+
+template<typename T>
+struct Bucket_Pool {
+    Memory_Allocator * alloc;
+    s64 bucket_size;
+    String purpose;
+
+    Array<Bucket_Pool_Bucket<T>> buckets;
+};
+
+template<typename T>
+intern 
+Bucket_Pool_Bucket<T> * bucket_pool_alloc_new_bucket(Bucket_Pool<T> * pool) {
+    auto * bucket = array_append(&pool->buckets);
+
+    auto storage_page = m_new(pool->alloc, pool->bucket_size * sizeof(T));
+    auto is_free_page = m_new(pool->alloc, (s64)ceil_f64((f64)pool->bucket_size / (f64)sizeof(*bucket->is_free)));
+
+    bucket->storage = (T*)storage_page.data;
+    bucket->storage_page = storage_page;
+
+    bucket->is_free = (u8*)is_free_page.data;
+    bucket->is_free_page = is_free_page;
+    bucket->free_slots = pool->bucket_size;
+
+    return bucket;
+}
+
+template<typename T>
+intern 
+Bucket_Pool<T> make_bucket_pool(
+        s64 bucket_size,
+        Memory_Allocator * alloc,
+        String purpose
+) {
+    Bucket_Pool<T> ret = {};
+    ret.alloc = alloc;
+    ret.bucket_size = bucket_size;
+    ret.purpose = purpose;
+    ret.buckets = make_array<Bucket_Pool_Bucket<T>>(4, alloc, "bucket pool bucket array"_S);
+
+    bucket_pool_alloc_new_bucket(&ret);
+
+    return ret;
+};
+
+template<typename T>
+struct Object_In_Bucket_Pool {
+    T * data;
+    s64 bucket_index;
+    s64 slot_index;
+};
+
+
+template<typename T>
+intern 
+Object_In_Bucket_Pool<T> bucket_pool_spawn_object(Bucket_Pool<T> * pool) {
+    Object_In_Bucket_Pool<T> ret = {};
+
+    s64 bucket_index = 0;
+    Bucket_Pool_Bucket<T> * bucket = 0;
+
+    For(pool->buckets) {
+        assert(it->free_slots <= pool->bucket_size);
+
+        if(it->free_slots > 0) {
+            bucket = it;
+            break;
+        }
+
+        bucket_index++;
+    }
+
+    if(!bucket) {
+        bucket = bucket_pool_alloc_new_bucket(pool);
+        bucket_index = pool->buckets.watermark - 1;
+    }
+
+    s64 final_slot_index = 0;
+
+    ForRange(slot_index, 0, pool->bucket_size) {
+        auto unit_size = sizeof(*bucket->is_free);
+        auto byte_index = slot_index / unit_size;
+        auto bit_index = slot_index % unit_size;
+
+        auto * byte = bucket->is_free + byte_index;
+        auto mask = 1 << bit_index;
+        if((*byte) & mask) {
+            continue;
+        }
+
+        final_slot_index = slot_index;
+        *byte |= mask;
+
+        break;
+    }
+
+    auto * obj = bucket->storage + final_slot_index;
+    *obj = T();
+
+    ret.data = obj;
+    ret.bucket_index = bucket_index;
+    ret.slot_index = final_slot_index;
+
+    bucket->free_slots--;
+
+    return ret;
+}
+
+template<typename T>
+intern 
+void bucket_pool_destroy_object(
+        Bucket_Pool<T> * pool,
+        Object_In_Bucket_Pool<T> ref
+) {
+    assert(ref.slot_index < pool->bucket_size);
+    assert(ref.bucket_index < pool->buckets.watermark);
+
+    auto * bucket = pool->buckets.storage + ref.bucket_index;
+    auto unit_size = sizeof(*bucket->is_free);
+    auto byte_index = ref.slot_index / unit_size;
+    auto bit_index = ref.slot_index % unit_size;
+
+    bucket->is_free[byte_index] &= ~(1 << bit_index);
+    bucket->free_slots++;
+}
+
 #if defined (TESTING)
 
 intern Memory_Allocator global_test_allocator = make_page_memory_allocator();
@@ -6252,6 +6554,70 @@ intern Memory_Allocator global_test_temp_allocator = make_arena_memory_allocator
 \
     intern name##_global = {}; \
     intern void name##_test()
+
+TEST(object_pool) {
+    struct Temp {
+        u8 data[128];
+    };
+
+    {
+        auto pool = make_bucket_pool<Temp>(2, &global_test_allocator, "asdf"_S);
+
+        {
+            auto ref1 = bucket_pool_spawn_object(&pool);
+            assert(ref1.data);
+            assert(ref1.bucket_index == 0);
+            assert(ref1.slot_index == 0);
+
+            auto ref2 = bucket_pool_spawn_object(&pool);
+            assert(ref2.data);
+            assert(ref2.bucket_index == 0);
+            assert(ref2.slot_index == 1);
+
+            bucket_pool_destroy_object(&pool, ref1);
+        }
+
+        {
+            auto ref = bucket_pool_spawn_object(&pool);
+            assert(ref.data);
+            assert(ref.bucket_index == 0);
+            assert(ref.slot_index == 0);
+        }
+
+        {
+            auto ref = bucket_pool_spawn_object(&pool);
+            assert(ref.data);
+            assert(ref.bucket_index == 1);
+            assert(ref.slot_index == 0);
+        }
+    }
+
+    {
+        auto pool = make_bucket_pool<Temp>(32, &global_test_allocator, "asdf"_S);
+
+        ForRange(index, 0, pool.bucket_size * 32) {
+            auto expected_bucket_index = index / pool.bucket_size;
+            auto expected_slot_index = index % pool.bucket_size;
+
+            auto ref = bucket_pool_spawn_object(&pool);
+            assert(ref.data);
+            assert(ref.bucket_index == expected_bucket_index);
+            assert(ref.slot_index == expected_slot_index);
+        }
+    }
+
+    {
+        auto pool = make_bucket_pool<Temp>(32, &global_test_allocator, "asdf"_S);
+
+        ForRange(index, 0, pool.bucket_size * 32) {
+            auto ref = bucket_pool_spawn_object(&pool);
+            assert(ref.data);
+            assert(ref.bucket_index == 0);
+            assert(ref.slot_index == 0);
+            bucket_pool_destroy_object(&pool, ref);
+        }
+    }
+}
 
 TEST(table) {
     auto table = make_table<s32>(4, &global_test_allocator, "test"_S);
@@ -6280,6 +6646,50 @@ TEST(table) {
 
         assert(*table_get(&table, str.string) == i);
     }
+}
+
+TEST(string_splitting) {
+    {
+        auto text = "hello/world/test!"_S;
+        auto split = string_split(text, '/', &global_test_allocator);
+        assert(split.watermark == 3);
+        assert(string_equals_case_sensitive(split.storage[0], "hello"_S));
+        assert(string_equals_case_sensitive(split.storage[1], "world"_S));
+        assert(string_equals_case_sensitive(split.storage[2], "test!"_S));
+    }
+
+    {
+        auto text = ""_S;
+        auto split = string_split(text, '/', &global_test_allocator);
+        assert(split.watermark == 0);
+    }
+
+    {
+        auto text = "//"_S;
+        auto split = string_split(text, '/', &global_test_allocator);
+        assert(split.watermark == 3);
+        assert(string_equals_case_sensitive(split.storage[0], ""_S));
+        assert(string_equals_case_sensitive(split.storage[1], ""_S));
+        assert(string_equals_case_sensitive(split.storage[2], ""_S));
+    }
+    {
+        auto text = "//a"_S;
+        auto split = string_split(text, '/', &global_test_allocator);
+        assert(split.watermark == 3);
+        assert(string_equals_case_sensitive(split.storage[0], ""_S));
+        assert(string_equals_case_sensitive(split.storage[1], ""_S));
+        assert(string_equals_case_sensitive(split.storage[2], "a"_S));
+    }
+    {
+        auto text = "/home/user/file.txt"_S;
+        auto split = string_split(text, '/', &global_test_allocator);
+        assert(split.watermark == 4);
+        assert(string_equals_case_sensitive(split.storage[0], ""_S));
+        assert(string_equals_case_sensitive(split.storage[1], "home"_S));
+        assert(string_equals_case_sensitive(split.storage[2], "user"_S));
+        assert(string_equals_case_sensitive(split.storage[3], "file.txt"_S));
+    }
+
 }
 
 intern force_inline

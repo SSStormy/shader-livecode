@@ -82,11 +82,28 @@ b32 compile_shader_part(
     return true;
 }
 
+struct Uniform_Info {
+    String name; // NOTE(justas): freeme
+    GLenum type;
+    u32 id;
+
+    union {
+        b32 boolean;
+        f32 float32;
+        s32 signed32;
+        v2 vector2_f32;
+        v3 vector3_f32;
+        v4 vector4_f32;
+    } as;
+};
+
+intern b32 show_uniform_window = false;
+
 struct Gl_Shader_Part {
     String name = empty_string;
     u64 comparison_hash;
     u32 id = -1;
-    b32 did_change_this_frame;
+    String error;
 };
 
 struct Gl_Shader {
@@ -94,13 +111,28 @@ struct Gl_Shader {
     u32 id = -1;
 
     Array<u64> part_hashes;
+    Array<Uniform_Info> uniforms;
+
+    String error;
 
     Gl_Shader() {
         part_hashes = make_array<u64>(8, &malloc_allocator, "gl shader part hashes"_S);
+        uniforms = make_array<Uniform_Info>(8, &malloc_allocator, "uniforms"_S);
+    }
+
+    void clear_uniforms() {
+        For(uniforms) {
+            string_free(&malloc_allocator, &it->name);
+        }
+
+        array_clear(&uniforms);
     }
 
     void free() {
+        clear_uniforms();
+        array_free(&uniforms);
         array_free(&part_hashes);
+        string_free(&malloc_allocator, &error);
     }
 };
 
@@ -150,6 +182,229 @@ struct Lua_Renderer {
 
 intern Lua_Renderer renderer;
 intern f64 dt;
+
+intern
+s32 get_uniform_index(
+        Gl_Shader * shader,
+        const char * loc,
+        b32 complain = true
+) {
+    auto val = glGetUniformLocation(shader->id, loc);
+    if(complain && val == -1) {
+        //printf("failed to find uniform '%s' in program '%.*s'\n", loc, shader->name.length, shader->name.str);
+    }
+
+    return val;
+}
+
+intern force_inline
+void set_uniform_f32(Gl_Shader * shader, const char * name, f32 value) {
+    glUniform1f(get_uniform_index(shader, name), value);
+}
+
+intern force_inline
+void set_uniform_b32(Gl_Shader * shader, const char * name, b32 value) {
+    glUniform1i(get_uniform_index(shader, name), value);
+}
+
+intern force_inline
+void set_uniform_v2_f32(Gl_Shader * shader, const char * name, v2_f64 value, b32 complain = true) {
+    v2 converted = v2_f64_to_v2_f32(value);
+    glUniform2fv(get_uniform_index(shader, name, complain), 1, (f32*)&converted);
+}
+
+intern force_inline
+void set_uniform_v4_f32(Gl_Shader * shader, const char * name, v4_f64 value) {
+    v4 converted = v4_f64_to_v4_f32(value);
+    glUniform4fv(get_uniform_index(shader, name), 1, (f32*)&converted);
+}
+
+intern force_inline
+void set_uniform_v2_s32(Gl_Shader * shader, const char * name, v2_s32 value) {
+    glUniform2iv(get_uniform_index(shader, name), 1, (s32*)&value);
+}
+
+intern force_inline
+void set_uniform_s32(Gl_Shader * shader, const char * name, s32 value) {
+    glUniform1i(get_uniform_index(shader, name), value);
+}
+
+intern force_inline
+void set_uniform_v2_f32(Gl_Shader * shader, const char * name, v2 value, b32 complain = true) {
+    glUniform2fv(get_uniform_index(shader, name, complain), 1, (f32*)&value);
+}
+
+
+intern force_inline
+void set_uniform_v3_f32(Gl_Shader * shader, const char * name, v3 value) {
+    glUniform3fv(get_uniform_index(shader, name), 1, (f32*)&value);
+}
+
+intern force_inline
+void set_uniform_v4_f32(Gl_Shader * shader, const char * name, v4 value) {
+    glUniform4fv(get_uniform_index(shader, name), 1, (f32*)&value);
+}
+
+intern force_inline
+void set_uniform_m3_f64(Gl_Shader * shader, const char * name, m3_f64 value) {
+    m3 converted = m3_f64_to_m3_f32(&value);
+    glUniformMatrix3fv(get_uniform_index(shader, name), 1, GL_FALSE, (f32*)&converted);
+}
+
+intern force_inline
+void set_uniform_m4(Gl_Shader * shader, const char * name, m4 value) {
+    glUniformMatrix4fv(get_uniform_index(shader, name), 1, GL_FALSE, (f32*)&value);
+}
+
+
+intern
+void fetch_shader_uniform_values(Gl_Shader * shader) {
+    For(shader->uniforms) {
+#define UNSUPPORTED(M__WHAT) printf("unsupported" M__WHAT "\n")
+
+        switch(it->type)
+        {
+            case GL_FLOAT: glGetUniformfv(shader->id, it->id, (f32*)&it->as); break;
+            case GL_FLOAT_VEC2: glGetUniformfv(shader->id, it->id, (f32*)&it->as); break;
+            case GL_FLOAT_VEC3: glGetUniformfv(shader->id, it->id, (f32*)&it->as); break;
+            case GL_FLOAT_VEC4: glGetUniformfv(shader->id, it->id, (f32*)&it->as); break;
+            case GL_INT:    glGetUniformiv(shader->id, it->id, (s32*)&it->as); break;
+            case GL_INT_VEC2: 	UNSUPPORTED("ivec2"); break;
+            case GL_INT_VEC3: 	UNSUPPORTED("ivec3"); break;
+            case GL_INT_VEC4: 	UNSUPPORTED("ivec4"); break;
+            case GL_UNSIGNED_INT: 	UNSUPPORTED("unsigned int"); break;
+            case GL_UNSIGNED_INT_VEC2: 	UNSUPPORTED("uvec2"); break;
+            case GL_UNSIGNED_INT_VEC3: 	UNSUPPORTED("uvec3"); break;
+            case GL_UNSIGNED_INT_VEC4: 	UNSUPPORTED("uvec4"); break;
+            case GL_BOOL: glGetUniformiv(shader->id, it->id, (s32*)&it->as); break;
+            case GL_BOOL_VEC2: 	UNSUPPORTED("bvec2"); break;
+            case GL_BOOL_VEC3: 	UNSUPPORTED("bvec3"); break;
+            case GL_BOOL_VEC4: 	UNSUPPORTED("bvec4"); break;
+            case GL_FLOAT_MAT2: 	UNSUPPORTED("mat2"); break;
+            case GL_FLOAT_MAT3: 	UNSUPPORTED("mat3"); break;
+            case GL_FLOAT_MAT4: 	UNSUPPORTED("mat4"); break;
+            case GL_FLOAT_MAT2x3: 	UNSUPPORTED("mat2x3"); break;
+            case GL_FLOAT_MAT2x4: 	UNSUPPORTED("mat2x4"); break;
+            case GL_FLOAT_MAT3x2: 	UNSUPPORTED("mat3x2"); break;
+            case GL_FLOAT_MAT3x4: 	UNSUPPORTED("mat3x4"); break;
+            case GL_FLOAT_MAT4x2: 	UNSUPPORTED("mat4x2"); break;
+            case GL_FLOAT_MAT4x3: 	UNSUPPORTED("mat4x3"); break;
+            case GL_SAMPLER_1D: 	UNSUPPORTED("sampler1D"); break;
+            case GL_SAMPLER_2D: 	UNSUPPORTED("sampler2D"); break;
+            case GL_SAMPLER_3D: 	UNSUPPORTED("sampler3D"); break;
+            case GL_SAMPLER_CUBE: 	UNSUPPORTED("samplerCube"); break;
+            case GL_SAMPLER_1D_SHADOW: 	UNSUPPORTED("sampler1DShadow"); break;
+            case GL_SAMPLER_2D_SHADOW: 	UNSUPPORTED("sampler2DShadow"); break;
+            case GL_SAMPLER_1D_ARRAY: 	UNSUPPORTED("sampler1DArray"); break;
+            case GL_SAMPLER_2D_ARRAY: 	UNSUPPORTED("sampler2DArray"); break;
+            case GL_SAMPLER_1D_ARRAY_SHADOW: 	UNSUPPORTED("sampler1DArrayShadow"); break;
+            case GL_SAMPLER_2D_ARRAY_SHADOW: 	UNSUPPORTED("sampler2DArrayShadow"); break;
+            case GL_SAMPLER_2D_MULTISAMPLE: 	UNSUPPORTED("sampler2DMS"); break;
+            case GL_SAMPLER_2D_MULTISAMPLE_ARRAY: 	UNSUPPORTED("sampler2DMSArray"); break;
+            case GL_SAMPLER_CUBE_SHADOW: 	UNSUPPORTED("samplerCubeShadow"); break;
+            case GL_SAMPLER_BUFFER: 	UNSUPPORTED("samplerBuffer"); break;
+            case GL_SAMPLER_2D_RECT: 	UNSUPPORTED("sampler2DRect"); break;
+            case GL_SAMPLER_2D_RECT_SHADOW: 	UNSUPPORTED("sampler2DRectShadow"); break;
+            case GL_INT_SAMPLER_1D: 	UNSUPPORTED("isampler1D"); break;
+            case GL_INT_SAMPLER_2D: 	UNSUPPORTED("isampler2D"); break;
+            case GL_INT_SAMPLER_3D: 	UNSUPPORTED("isampler3D"); break;
+            case GL_INT_SAMPLER_CUBE: 	UNSUPPORTED("isamplerCube"); break;
+            case GL_INT_SAMPLER_1D_ARRAY: 	UNSUPPORTED("isampler1DArray"); break;
+            case GL_INT_SAMPLER_2D_ARRAY: 	UNSUPPORTED("isampler2DArray"); break;
+            case GL_INT_SAMPLER_2D_MULTISAMPLE: 	UNSUPPORTED("isampler2DMS"); break;
+            case GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY: 	UNSUPPORTED("isampler2DMSArray"); break;
+            case GL_INT_SAMPLER_BUFFER: 	UNSUPPORTED("isamplerBuffer"); break;
+            case GL_INT_SAMPLER_2D_RECT: 	UNSUPPORTED("isampler2DRect"); break;
+            case GL_UNSIGNED_INT_SAMPLER_1D: 	UNSUPPORTED("usampler1D"); break;
+            case GL_UNSIGNED_INT_SAMPLER_2D: 	UNSUPPORTED("usampler2D"); break;
+            case GL_UNSIGNED_INT_SAMPLER_3D: 	UNSUPPORTED("usampler3D"); break;
+            case GL_UNSIGNED_INT_SAMPLER_CUBE: 	UNSUPPORTED("usamplerCube"); break;
+            case GL_UNSIGNED_INT_SAMPLER_1D_ARRAY: 	UNSUPPORTED("usampler2DArray"); break;
+            case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY: 	UNSUPPORTED("usampler2DArray"); break;
+            case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE: 	UNSUPPORTED("usampler2DMS"); break;
+            case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY: 	UNSUPPORTED("usampler2DMSArray"); break;
+            case GL_UNSIGNED_INT_SAMPLER_BUFFER: 	UNSUPPORTED("usamplerBuffer"); break;
+            case GL_UNSIGNED_INT_SAMPLER_2D_RECT: 	UNSUPPORTED("usampler2DRect"); break;
+            default: UNSUPPORTED("unknown type"); break;
+        }
+#undef UNSUPPORTED
+    }
+}
+
+intern
+void flush_shader_uniform_values(Gl_Shader * shader) {
+    For(shader->uniforms) {
+#define UNSUPPORTED(M__WHAT) printf("unsupported" M__WHAT "\n")
+
+        switch(it->type)
+        {
+            case GL_FLOAT: set_uniform_f32(shader, it->name.str, it->as.float32); break;
+            case GL_FLOAT_VEC2: set_uniform_v2_f32(shader, it->name.str, it->as.vector2_f32); break;
+            case GL_FLOAT_VEC3: set_uniform_v3_f32(shader, it->name.str, it->as.vector3_f32); break;
+            case GL_FLOAT_VEC4: set_uniform_v4_f32(shader, it->name.str, it->as.vector4_f32); break;
+            case GL_INT:    set_uniform_s32(shader, it->name.str, it->as.signed32); break;
+            case GL_INT_VEC2: 	UNSUPPORTED("ivec2"); break;
+            case GL_INT_VEC3: 	UNSUPPORTED("ivec3"); break;
+            case GL_INT_VEC4: 	UNSUPPORTED("ivec4"); break;
+            case GL_UNSIGNED_INT: 	UNSUPPORTED("unsigned int"); break;
+            case GL_UNSIGNED_INT_VEC2: 	UNSUPPORTED("uvec2"); break;
+            case GL_UNSIGNED_INT_VEC3: 	UNSUPPORTED("uvec3"); break;
+            case GL_UNSIGNED_INT_VEC4: 	UNSUPPORTED("uvec4"); break;
+            case GL_BOOL: set_uniform_s32(shader, it->name.str, it->as.boolean); break;
+            case GL_BOOL_VEC2: 	UNSUPPORTED("bvec2"); break;
+            case GL_BOOL_VEC3: 	UNSUPPORTED("bvec3"); break;
+            case GL_BOOL_VEC4: 	UNSUPPORTED("bvec4"); break;
+            case GL_FLOAT_MAT2: 	UNSUPPORTED("mat2"); break;
+            case GL_FLOAT_MAT3: 	UNSUPPORTED("mat3"); break;
+            case GL_FLOAT_MAT4: 	UNSUPPORTED("mat4"); break;
+            case GL_FLOAT_MAT2x3: 	UNSUPPORTED("mat2x3"); break;
+            case GL_FLOAT_MAT2x4: 	UNSUPPORTED("mat2x4"); break;
+            case GL_FLOAT_MAT3x2: 	UNSUPPORTED("mat3x2"); break;
+            case GL_FLOAT_MAT3x4: 	UNSUPPORTED("mat3x4"); break;
+            case GL_FLOAT_MAT4x2: 	UNSUPPORTED("mat4x2"); break;
+            case GL_FLOAT_MAT4x3: 	UNSUPPORTED("mat4x3"); break;
+            case GL_SAMPLER_1D: 	UNSUPPORTED("sampler1D"); break;
+            case GL_SAMPLER_2D: 	UNSUPPORTED("sampler2D"); break;
+            case GL_SAMPLER_3D: 	UNSUPPORTED("sampler3D"); break;
+            case GL_SAMPLER_CUBE: 	UNSUPPORTED("samplerCube"); break;
+            case GL_SAMPLER_1D_SHADOW: 	UNSUPPORTED("sampler1DShadow"); break;
+            case GL_SAMPLER_2D_SHADOW: 	UNSUPPORTED("sampler2DShadow"); break;
+            case GL_SAMPLER_1D_ARRAY: 	UNSUPPORTED("sampler1DArray"); break;
+            case GL_SAMPLER_2D_ARRAY: 	UNSUPPORTED("sampler2DArray"); break;
+            case GL_SAMPLER_1D_ARRAY_SHADOW: 	UNSUPPORTED("sampler1DArrayShadow"); break;
+            case GL_SAMPLER_2D_ARRAY_SHADOW: 	UNSUPPORTED("sampler2DArrayShadow"); break;
+            case GL_SAMPLER_2D_MULTISAMPLE: 	UNSUPPORTED("sampler2DMS"); break;
+            case GL_SAMPLER_2D_MULTISAMPLE_ARRAY: 	UNSUPPORTED("sampler2DMSArray"); break;
+            case GL_SAMPLER_CUBE_SHADOW: 	UNSUPPORTED("samplerCubeShadow"); break;
+            case GL_SAMPLER_BUFFER: 	UNSUPPORTED("samplerBuffer"); break;
+            case GL_SAMPLER_2D_RECT: 	UNSUPPORTED("sampler2DRect"); break;
+            case GL_SAMPLER_2D_RECT_SHADOW: 	UNSUPPORTED("sampler2DRectShadow"); break;
+            case GL_INT_SAMPLER_1D: 	UNSUPPORTED("isampler1D"); break;
+            case GL_INT_SAMPLER_2D: 	UNSUPPORTED("isampler2D"); break;
+            case GL_INT_SAMPLER_3D: 	UNSUPPORTED("isampler3D"); break;
+            case GL_INT_SAMPLER_CUBE: 	UNSUPPORTED("isamplerCube"); break;
+            case GL_INT_SAMPLER_1D_ARRAY: 	UNSUPPORTED("isampler1DArray"); break;
+            case GL_INT_SAMPLER_2D_ARRAY: 	UNSUPPORTED("isampler2DArray"); break;
+            case GL_INT_SAMPLER_2D_MULTISAMPLE: 	UNSUPPORTED("isampler2DMS"); break;
+            case GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY: 	UNSUPPORTED("isampler2DMSArray"); break;
+            case GL_INT_SAMPLER_BUFFER: 	UNSUPPORTED("isamplerBuffer"); break;
+            case GL_INT_SAMPLER_2D_RECT: 	UNSUPPORTED("isampler2DRect"); break;
+            case GL_UNSIGNED_INT_SAMPLER_1D: 	UNSUPPORTED("usampler1D"); break;
+            case GL_UNSIGNED_INT_SAMPLER_2D: 	UNSUPPORTED("usampler2D"); break;
+            case GL_UNSIGNED_INT_SAMPLER_3D: 	UNSUPPORTED("usampler3D"); break;
+            case GL_UNSIGNED_INT_SAMPLER_CUBE: 	UNSUPPORTED("usamplerCube"); break;
+            case GL_UNSIGNED_INT_SAMPLER_1D_ARRAY: 	UNSUPPORTED("usampler2DArray"); break;
+            case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY: 	UNSUPPORTED("usampler2DArray"); break;
+            case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE: 	UNSUPPORTED("usampler2DMS"); break;
+            case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY: 	UNSUPPORTED("usampler2DMSArray"); break;
+            case GL_UNSIGNED_INT_SAMPLER_BUFFER: 	UNSUPPORTED("usamplerBuffer"); break;
+            case GL_UNSIGNED_INT_SAMPLER_2D_RECT: 	UNSUPPORTED("usampler2DRect"); break;
+            default: UNSUPPORTED("unknown type"); break;
+        }
+#undef UNSUPPORTED
+    }
+
+}
 
 intern
 b32 does_asset_need_loading(Asset_Entry * asset) {
@@ -213,78 +468,6 @@ b32 did_shader_compile_properly(
     return false;
 }
 
-intern
-s32 get_uniform_index(
-        Gl_Shader * shader,
-        const char * loc,
-        b32 complain = true
-) {
-    auto val = glGetUniformLocation(shader->id, loc);
-    if(complain && val == -1) {
-        //printf("failed to find uniform '%s' in program '%.*s'\n", loc, shader->name.length, shader->name.str);
-    }
-
-    return val;
-}
-
-intern force_inline
-void set_uniform_f32(Gl_Shader * shader, const char * name, f64 value) {
-    glUniform1f(get_uniform_index(shader, name), value);
-}
-
-intern force_inline
-void set_uniform_b32(Gl_Shader * shader, const char * name, b32 value) {
-    glUniform1i(get_uniform_index(shader, name), value);
-}
-
-intern force_inline
-void set_uniform_v2_f32(Gl_Shader * shader, const char * name, v2_f64 value, b32 complain = true) {
-    v2 converted = v2_f64_to_v2_f32(value);
-    glUniform2fv(get_uniform_index(shader, name, complain), 1, (f32*)&converted);
-}
-
-intern force_inline
-void set_uniform_v4_f32(Gl_Shader * shader, const char * name, v4_f64 value) {
-    v4 converted = v4_f64_to_v4_f32(value);
-    glUniform4fv(get_uniform_index(shader, name), 1, (f32*)&converted);
-}
-
-intern force_inline
-void set_uniform_v2_s32(Gl_Shader * shader, const char * name, v2_s32 value) {
-    glUniform2iv(get_uniform_index(shader, name), 1, (s32*)&value);
-}
-
-intern force_inline
-void set_uniform_s32(Gl_Shader * shader, const char * name, s32 value) {
-    glUniform1i(get_uniform_index(shader, name), value);
-}
-
-intern force_inline
-void set_uniform_v2_f32(Gl_Shader * shader, const char * name, v2 value, b32 complain = true) {
-    glUniform2fv(get_uniform_index(shader, name, complain), 1, (f32*)&value);
-}
-
-
-intern force_inline
-void set_uniform_v3_f32(Gl_Shader * shader, const char * name, v3 value) {
-    glUniform4fv(get_uniform_index(shader, name), 1, (f32*)&value);
-}
-
-intern force_inline
-void set_uniform_v4_f32(Gl_Shader * shader, const char * name, v4 value) {
-    glUniform4fv(get_uniform_index(shader, name), 1, (f32*)&value);
-}
-
-intern force_inline
-void set_uniform_m3_f64(Gl_Shader * shader, const char * name, m3_f64 value) {
-    m3 converted = m3_f64_to_m3_f32(&value);
-    glUniformMatrix3fv(get_uniform_index(shader, name), 1, GL_FALSE, (f32*)&converted);
-}
-
-intern force_inline
-void set_uniform_m4(Gl_Shader * shader, const char * name, m4 value) {
-    glUniformMatrix4fv(get_uniform_index(shader, name), 1, GL_FALSE, (f32*)&value);
-}
 
 intern u32 quad_vao;
 intern u32 quad_vbo;
@@ -369,21 +552,30 @@ b32 try_load_renderer(
 
         auto * asset = r->get_asset(hash, dir);
         auto * part = table_insert_or_initialize_new(&r->shader_parts, hash);
+        part->name = name;
 
         auto load = false;
+
         if(does_asset_need_loading(asset)) {
-            load = true;
-        }
-        else if(!string_equals_case_sensitive(name, part->name)) {
             load = true;
         }
 
         if(load) {
+            if(part->id != -1) {
+                glDeleteProgram(part->id);
+                part->id = -1;
+            }
+
+            part->comparison_hash = hash * 13 + asset->last_load_time;
+
+            string_free(&malloc_allocator, &part->error);
+
             auto read = plat_fs_read_entire_file(dir, r->temp_alloc);
 
             if(!read.did_succeed) {
+                part->error = "failed to read shader"_S;
                 printf("failed to read shader %s\n", dir);
-                return (void*)0;
+                return (void*)hash;
             }
 
             String error;
@@ -391,22 +583,37 @@ b32 try_load_renderer(
             auto result = compile_shader_part(type, read.as_string, empty_string, r->temp_alloc, &error, &part_id);
             if(!result) {
                 printf("failed to compile shader '%s': %.*s\n", cname, error.length, error.str);
-                return (void*)0;
-            }
 
-            if(part->id != -1) {
-                glDeleteProgram(part->id);
+                auto a = make_string_copy(error, &malloc_allocator);
+                part->error = a.string;
+
+                return (void*)hash;
             }
 
             printf("compiled new shader '%s' %d %d %llu\n", cname, type, part_id, hash);
 
-            part->name = name;
             part->id = part_id;
-            part->did_change_this_frame = true;
-            part->comparison_hash = hash * 13 + asset->last_load_time;
         }
 
         return (void*)hash;
+    };
+
+    lua["find_file_that_starts_with_in_folder"] = [](Lua_Renderer * r, const char * cstarts_with, const char * in_folder) {
+        auto * temp = r->temp_alloc;
+        auto files = get_all_files_in_directory(in_folder, temp);
+
+        auto starts_with = make_string(cstarts_with);
+
+        For(files) {
+            if(!it->is_file) {
+                continue;
+            }
+            if(string_starts_with(it->name, starts_with)) {
+                return temp_cstring(it->name, temp);
+            }
+        }
+
+        return "file_not_found";
     };
 
     lua["gl_use_shader"] = [](Lua_Renderer * r, void * void_shader_hash) {
@@ -431,6 +638,7 @@ b32 try_load_renderer(
         auto hash = hash_fnv(name);
 
         auto * shader = table_insert_or_initialize_new(&r->shaders, hash);
+        shader->name = name;
 
         auto needs_reload = false;
 
@@ -465,13 +673,17 @@ b32 try_load_renderer(
 
         if(needs_reload) {
             array_clear(&shader->part_hashes);
+            string_free(&malloc_allocator, &shader->error);
 
+            shader->clear_uniforms();
+    
             auto id = glCreateProgram();
 
             printf("reloading shader %s\n", cname);
 
             if(shader->id != -1) {
                 glDeleteProgram(shader->id);
+                shader->id = -1;
             }
 
             for(auto & kvp : t) {
@@ -481,8 +693,12 @@ b32 try_load_renderer(
 
                 if(part->id == -1) {
                     printf("gl_load_shader was passed an uninitialized shader %llu!\n", part_hash);
+
+                    auto a = make_string_copy(part->error, &malloc_allocator);
+                    shader->error = a.string;
+
                     glDeleteProgram(shader->id);
-                    return (void*)0;
+                    return (void*)hash;
                 }
 
                 glAttachShader(id, part->id);
@@ -494,12 +710,34 @@ b32 try_load_renderer(
                 printf("Failed to compile shader '%s'. Error:\n", cname);
                 printf("%.*s\n", error.length, error.str);
 
+                auto a = make_string_copy(error, &malloc_allocator);
+                shader->error = a.string;
+
                 glDeleteProgram(id);
-                return (void*)0;
+                return (void*)hash;
             }
 
             shader->id = id;
-            shader->name = name;
+
+
+            {
+                s32 num_uniforms;
+                s32 max_name_length;
+                glGetProgramiv(id, GL_ACTIVE_UNIFORMS, &num_uniforms);
+                glGetProgramiv(id, GL_ACTIVE_UNIFORM_MAX_LENGTH, &max_name_length);
+
+                array_reserve(&shader->uniforms, num_uniforms);
+
+                ForRange(index, 0, num_uniforms) {
+                    auto * uniform = array_append(&shader->uniforms);
+                    auto name_alloc = m_new(&malloc_allocator, max_name_length);
+                    uniform->id = index;
+                    uniform->name = make_string((const char*)name_alloc.data);
+
+                    s32 temp;
+                    glGetActiveUniform(id, index, max_name_length, &temp, &temp, &uniform->type, (GLchar*)uniform->name.str);
+                }
+            }
         }
         return (void*)hash;
     };
@@ -539,6 +777,15 @@ b32 try_load_renderer(
         set_uniform_v2_f32(&r->active_shader, uniform, v);
     };
 
+    lua["gl_enable_srgb"] = [](Lua_Renderer * r) {
+        glEnable(GL_FRAMEBUFFER_SRGB);
+    };
+
+    lua["gl_disable_srgb"] = [](Lua_Renderer * r) {
+        glDisable(GL_FRAMEBUFFER_SRGB);
+    };
+
+
     return true;
 }
 
@@ -562,12 +809,13 @@ int main(int argc, char** argv) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
+    SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
 
     auto gl_context = SDL_GL_CreateContext(window);
 
     gl3wInit();
     
-    glClearColor(8.f/255.f, 7.f/255.f, 17.f/255.f, 1.0f);
+    glClearColor(0,0,0,1);
 
     SDL_GL_SetSwapInterval(1);
 
@@ -643,6 +891,10 @@ int main(int argc, char** argv) {
                         should_quit = true;
                         break;
                     }
+                    case SDLK_F1: {
+                        show_uniform_window = !show_uniform_window;
+                        break;
+                    }
                 }
             }
             else if(event.type == SDL_WINDOWEVENT)
@@ -672,6 +924,10 @@ int main(int argc, char** argv) {
                 renderer = std::move(temp);
             }
         }
+
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplSDL2_NewFrame(window);
+        ImGui::NewFrame();
     
         if(renderer.can_render) {
             auto & lua = renderer.lua;
@@ -681,12 +937,7 @@ int main(int argc, char** argv) {
             lua["_time"] = shader_time;
             lua["_resolution_x"] = (f32)window_size.x;
             lua["_resolution_y"] = (f32)window_size.y;
-
-            // Start the Dear ImGui frame
-            ImGui_ImplOpenGL3_NewFrame();
-            ImGui_ImplSDL2_NewFrame(window);
-            ImGui::NewFrame();
-
+            
             {
                 sol::protected_function render_fx = lua["render"];
                 auto result = render_fx();
@@ -697,10 +948,92 @@ int main(int argc, char** argv) {
                     renderer.can_render = false;
                 }
             }
-
-            ImGui::Render();
-            ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         }
+
+        {
+            struct Err {
+                String source;
+                String error;
+            };
+
+            auto errors = make_array<Err>(0, renderer.temp_alloc, "errors"_S);
+
+            for(auto * kvp : renderer.shaders) {
+                auto * shader = &kvp->value;
+
+                if(shader->error.length > 0) {
+                    auto * err = array_append(&errors);
+                    err->error = shader->error;
+                    err->source = shader->name;
+                }
+            }
+
+            if(errors.watermark > 0) {
+                if(ImGui::Begin("Errors")) {
+                    for(auto * err : errors) {
+                        ImGui::Text("====%.*s====", err->source.length, err->source.str);
+                        ImGui::Text("%.*s", err->error.length, err->error.str);
+                    }
+                }
+                ImGui::End();
+            }
+        }
+
+        {
+            auto uniforms = make_array<Uniform_Info*>(0, renderer.temp_alloc, "uniforms"_S);
+            for(auto * kvp : renderer.shaders) {
+                auto * shader = &kvp->value;
+
+                if(shader->uniforms.watermark > 0) {
+                    fetch_shader_uniform_values(shader);
+
+                    for(auto * uniform : shader->uniforms) {
+                        *array_append(&uniforms) = uniform;
+                    }
+                }
+            }
+
+            if(uniforms.watermark > 0 && show_uniform_window) {
+                if(ImGui::Begin("Uniforms")) {
+
+
+                    for(auto ** uniform_ptr : uniforms) {
+                        auto * it = *uniform_ptr;
+
+                        if(it->type == GL_FLOAT) {
+                            ImGui::DragFloat(it->name.str, &it->as.float32);
+                        }
+                        else if(it->type == GL_FLOAT_VEC2) {
+                            ImGui::DragFloat2(it->name.str, &it->as.float32);
+                        }
+                        else if(it->type == GL_FLOAT_VEC3) {
+                            ImGui::DragFloat3(it->name.str, &it->as.float32);
+                        }
+                        else if(it->type == GL_FLOAT_VEC4) {
+                            ImGui::DragFloat4(it->name.str, &it->as.float32);
+                        }
+                        else if(it->type == GL_INT) {
+                            ImGui::DragInt(it->name.str, &it->as.signed32);
+                        }
+                        else if(it->type == GL_BOOL) {
+                            ImGui::Checkbox(it->name.str, &it->as.boolean);
+                        }
+                    }
+                }
+                ImGui::End();
+            }
+
+            for(auto * kvp : renderer.shaders) {
+                auto * shader = &kvp->value;
+
+                if(shader->uniforms.watermark > 0) {
+                    flush_shader_uniform_values(shader);
+                }
+            }
+        }
+
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         SDL_GL_SwapWindow(window);
 

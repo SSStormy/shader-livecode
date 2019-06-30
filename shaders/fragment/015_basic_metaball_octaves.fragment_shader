@@ -1,3 +1,5 @@
+// Metaball octaves by Justas Dabrila
+// Licensed under CC BY 4.0
 #define v2 vec2
 #define v3 vec3
 #define v4 vec4
@@ -8,6 +10,7 @@
 #define TAU 6.283185307179586
 #define DEG_TO_RAD (TAU / 360.0)
 #define zero_v2 vec2(0,0)
+
 
 out v4 out_color;
 
@@ -27,31 +30,25 @@ f32 IGN_dither(in v2 p) {
     return fract(52.9829189*fract(dot(p, vec2(0.06711056, 0.00583715))));
 }
 
-
 void main() {
     out_color.rgba = v4(0, 0, 0, 0);
 
     aspect = v2(1, iResolution.y / iResolution.x);
 
     v2 uv = to_uv(gl_FragCoord.xy);
-    v2 mouse = to_uv(iMouse.xy);
-
-    mouse.y *= -1;
 
     f32 scale = 10;
     uv.xy *= scale;
-    mouse.xy *= scale;
 
     const f32 div = 10;
     const s32 octaves = 50;
 
 #if 1
-    out_color.b  = .2;
-    out_color.g  = .2;
-    out_color.r = .1;
-    out_color.a = .1;
+    out_color.b  = .01;
+    out_color.r = .005;
 #endif
 
+#if 1
     f32 all_balls = 0;
     for(s32 octave = 0;
             octave < octaves;
@@ -71,20 +68,20 @@ void main() {
 
         f32 life_t = fract(iTime * .1 + smoothstep(.4, .8, abs(sin(iTime))) * octave * .02);
         //f32 life_t = fract(iTime * .1 + 987 * octave * .01);
-        life_t /= fwidth(p.x) * 30;
+        life_t /= fwidth(p.x) * 40;
 
         v2 mb_pos = p + v2(-1, 0) * life_t * scale;
         f32 mb = 1 / length(mb_pos) * f_octave * .01;
 
-        out_color += v4(.1, .0,.0,.1) * mb * (1 - life_t);
+        out_color += v4(.03, .0,.0,.0) * mb * (1 - life_t);
 
         all_balls += mb;
     }
-
     
     all_balls /= octaves;
-    out_color += v4(.0, .1, .8, .2) * all_balls;
+    out_color += v4(.0, .1, .2, 0) * all_balls;
+#endif
 
-    out_color -= IGN_dither(gl_FragCoord.xy) * .05;
+    out_color -= IGN_dither(gl_FragCoord.xy) * .01;
 }
 

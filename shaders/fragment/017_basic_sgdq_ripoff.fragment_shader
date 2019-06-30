@@ -1,0 +1,107 @@
+#define v2 vec2
+#define v3 vec3
+#define v4 vec4
+#define f32 float
+#define s32 int
+#define b32 bool
+#define m2 mat2
+#define TAU (acos(-1.)*2.)
+#define DEG_TO_RAD (TAU / 360.0)
+#define zero_v2 vec2(0,0)
+
+out v4 out_color;
+
+uniform float iTime;
+uniform v2 iResolution;
+uniform v4 iMouse;
+
+f32 sdf_line ( in vec2 p, in vec2 a, in vec2 b ) {
+	vec2 pa = p-a, ba = b-a;
+	float h = clamp( dot(pa,ba)/dot(ba,ba), 0.0, 1.0 );
+	return length( pa - ba*h );
+}
+
+void main() {
+    const f32 div = .02;
+    const f32 octaves = 3;
+
+    v2 global_uv = (gl_FragCoord.xy / iResolution.xy) * v2(iResolution.x / iResolution.y, 1);
+
+    {
+        f32 a = 45 * DEG_TO_RAD;
+        v2 rot_uv = m2(cos(a), sin(a), -sin(a), cos(a)) * global_uv;
+        //v2 rot_uv = global_uv;
+        const f32 grid_div = .1;
+        v3 grid_col = v3(.3, 0, .4);
+
+        {
+            v2 uv = rot_uv;
+            uv.x = mod(uv.x + grid_div * .5, grid_div);
+            uv.y = mod(uv.y + grid_div * .5, grid_div);
+
+            f32 mul = .05;
+            f32 sdf = length(uv - v2(grid_div * .5, grid_div * .5)) - .002;
+            f32 mask = sdf > .001 ? 0 : 1;
+            out_color.rgb += grid_col * mul * mask;
+        }
+
+        {
+            v2 uv = rot_uv;
+            uv.x = mod(grid_div * .333 + uv.x, grid_div * .33333);
+            uv.y = mod(grid_div * .333 + uv.y, grid_div * .33333);
+
+            f32 mul = .025;
+
+            f32 sdf = sdf_line(uv, zero_v2, v2(1, 0));
+            sdf = min(sdf, sdf_line(uv, zero_v2, v2(0, 1)));
+
+            f32 mask = sdf > .001 ? 0 : 1;
+            out_color.rgb += grid_col * mul * mask;
+        }
+
+        {
+            v2 uv = rot_uv;
+            uv.x = mod(uv.x, grid_div);
+            uv.y = mod(uv.y, grid_div);
+
+            f32 mul = .05;
+
+            f32 sdf = sdf_line(uv, zero_v2, v2(1, 0));
+            sdf = min(sdf, sdf_line(uv, zero_v2, v2(0, 1)));
+
+            f32 mask = sdf > .001 ? 0 : 1;
+            out_color.rgb += grid_col * mul * mask;
+        }
+    }
+
+    for(s32 s_octave = 0; s_octave < s32(octaves); s_octave++) {
+        f32 octave = f32(s_octave) + 1;
+        v2 uv = global_uv;
+        uv.x += octave * (1 / octaves);
+
+        f32 index = floor(uv.x / div) + s_octave * div;
+        uv.x = mod(uv.x, div) - (div * .5);
+        uv.y *= s_octave % 2 == 0 ? 2 : 1;
+
+        f32 life_t = fract(cos(index) + f32(iTime) * .03 * octave);
+        v2 pos = v2(0, 1) * life_t * 3;
+
+        f32 sdf = sdf_line(uv, pos, v2(0,0));
+
+        f32 len_to_top = length(uv - pos);
+        f32 width = .0006 * octave;
+        f32 death_t = 1 - life_t;
+        f32 length_t = 1 / len_to_top;
+        f32 mask = (sdf > width ? 0. : 1.);
+
+        v3 line_color = v3(.2, 0, .4) * mask;
+        line_color += v3(.2, 0, 0) * length_t * mask;
+        line_color *= smoothstep(0, 20, length_t);
+
+        out_color.rgb += line_color;
+        if(len_to_top <= 0.001) {
+            out_color.rgb = v3(1);
+        }
+    }
+}
+

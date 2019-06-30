@@ -1,0 +1,41 @@
+#define v2 vec2
+#define v3 vec3
+#define v4 vec4
+#define f32 float
+#define s32 int
+#define b32 bool
+#define m2 mat2
+#define TAU (acos(-1.)*2.)
+#define DEG_TO_RAD (TAU / 360.0)
+#define zero_v2 vec2(0,0)
+
+out v4 out_color;
+
+uniform float iTime;
+uniform v2 iResolution;
+uniform v4 iMouse;
+
+v2 aspect;
+
+void main() {
+    out_color.rgba = v4(0, 0, 0, 0);
+
+    v2 uv = (gl_FragCoord.xy / iResolution.xy);
+    
+    f32 num_shades = 32;
+    //f32 x = floor(uv.x / (1. / num_shades)) / num_shades;
+    f32 x = pow(exp2(-uv.x*3.6),1.0/2.23333);
+    if(uv.y > .6) {
+        out_color.rgb = v3(x);
+        out_color.rgb = pow(out_color.rgb, v3(.45));
+    }
+    else if(uv.y > .3) {
+        out_color.rgb = v3(x);
+    }
+    else {
+        out_color.rgb = v3(x);
+        out_color.rgb = pow(out_color.rgb, v3(2.2));
+    }
+}
+
+
