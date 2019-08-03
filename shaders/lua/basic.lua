@@ -1,7 +1,7 @@
-local frag_name = "015"
+local frag_name = "025"
 
 function render()
-    target_fps(r, 144)
+    target_fps(r, 30)
     gl_clear_color(r)
     gl_disable_alpha_blend(r)
     gl_default_viewport(r)

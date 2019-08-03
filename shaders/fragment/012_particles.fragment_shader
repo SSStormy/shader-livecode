@@ -39,6 +39,7 @@ float pModPolar(inout vec2 p, float repetitions) {
 }
 
 void main() {
+#if 0
     out_color.rgba = v4(0, 0, 0, 0);
 
     aspect = v2(1, iResolution.y / iResolution.x);
@@ -75,5 +76,33 @@ void main() {
         out_color.b = f * .5;
         out_color.a -= smoothstep(0., 1., 1.5 - polar.y);
     }
+#elif 1
+    out_color.rgba = v4(0, 0, 0, 0);
+    aspect = v2(1, iResolution.y / iResolution.x);
+
+    v2 uv = to_uv(gl_FragCoord.xy);
+
+    v4 color = v4(.2, .1, .2, .3);
+
+    v2 origin = zero_v2;
+    f32 speed = .2;
+
+    v2 polar = v2(atan(uv.y, uv.x) + TAU, length(uv));
+    out_color.rg = polar * .6;
+
+/*
+    {
+        f32 f = abs(fract((polar.x / (TAU * (1./8.))) - polar.y + iTime) - .5) * 2;
+        //f32 f = abs(fract((polar.x / (TAU * (1./8.))) - polar.y + iTime) - .5) * 2;
+        //f = smoothstep(.5,.55,f);
+
+        out_color.r = f * .9;
+        out_color.g = f * .4;
+        out_color.a += smoothstep(0., 1., 2.2 - polar.y);
+    }
+    */
+
+
+#endif
 }
 

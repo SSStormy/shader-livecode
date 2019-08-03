@@ -1,0 +1,66 @@
+#define v2 vec2
+#define v3 vec3
+#define v4 vec4
+#define f32 float
+#define s32 int
+#define b32 bool
+#define m2 mat2
+#define m3 mat3
+#define TAU 6.283185307179586
+#define DEG_TO_RAD (TAU / 360.0)
+#define zero_v2 vec2(0,0)
+
+out v4 out_color;
+
+uniform float iTime;
+uniform v2 iResolution;
+uniform v4 iMouse;
+
+vec2 hash( vec2 p ) {
+	p = vec2(dot(p,vec2(127.1,311.7)), dot(p,vec2(269.5,183.3)));
+	return -1.0 + 2.0*fract(sin(p)*43758.5453123);
+}
+
+float noise( in vec2 p )
+{
+    vec2 i = floor( p );
+    vec2 f = fract( p );
+	
+	vec2 u = f*f*(3.0-2.0*f);
+
+    return mix( mix( dot( hash( i + vec2(0.0,0.0) ), f - vec2(0.0,0.0) ), 
+                     dot( hash( i + vec2(1.0,0.0) ), f - vec2(1.0,0.0) ), u.x),
+                mix( dot( hash( i + vec2(0.0,1.0) ), f - vec2(0.0,1.0) ), 
+                     dot( hash( i + vec2(1.0,1.0) ), f - vec2(1.0,1.0) ), u.x), u.y);
+}
+
+float fbm (in vec2 st) {
+
+    float value = -0.3;
+    float amplitude = 1;
+    float frequency = 0.0;
+
+    for (int i = 0; i < 6; i++) {
+        value += amplitude * noise(st);
+        st = mat2( 1.6,  1.2, -1.2,  1.6 ) * st;
+        amplitude *= .5;
+    }
+
+    return value;
+}
+
+void main() {
+    vec2 st = gl_FragCoord.xy/iResolution.xy;
+    st.x *= iResolution.x/iResolution.y;
+
+    vec3 color = vec3(0.0);
+
+    st *= 5;
+    color += fbm(st);
+    color -= fbm(st + 20) * .3;
+    color -= fbm(st + fbm(st) * 1) * .2;
+
+    out_color = vec4(color,1.0);
+}
+
+

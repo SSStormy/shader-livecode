@@ -1,0 +1,15 @@
+out vec4 out_color;
+uniform vec2 iResolution;
+
+void main() {
+    vec2 uv = (((gl_FragCoord.xy / iResolution) * 2.0f) - 1.0f);
+    uv.x *= iResolution.x / iResolution.y;
+
+    float dist = 1-(length(uv*10) - 0);
+    out_color.rgba = vec4(dist);
+}
+
+
+/*
+
+*/
